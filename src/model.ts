@@ -1,0 +1,5 @@
+export type Receptor={id:string;name:string;x:number;y:number;crop:string};
+export type PuffInput={windSpeed:number;windDirection:number;sourceRate:number;reduction:number;hour:number};
+export const receptors:Receptor[]=[{id:'F-12',name:'North wheat block',x:64,y:27,crop:'Wheat'},{id:'F-08',name:'Canal-side plot',x:74,y:54,crop:'Wheat'},{id:'F-21',name:'Research field',x:53,y:72,crop:'Barley'},{id:'F-03',name:'Village edge plot',x:86,y:76,crop:'Wheat'}];
+export function exposureAt(r:Receptor,input:PuffInput){const source={x:22,y:56};const rad=input.windDirection*Math.PI/180;const dx=r.x-source.x,dy=r.y-source.y;const down=dx*Math.cos(rad)+dy*Math.sin(rad);const cross=-dx*Math.sin(rad)+dy*Math.cos(rad);if(down<=0)return 0;const travel=Math.max(1,input.windSpeed*input.hour*2.5);const sigma=5+down*.16;const timeWeight=Math.exp(-Math.pow(down-travel,2)/(2*Math.pow(18+input.hour*2,2)));const lateral=Math.exp(-(cross*cross)/(2*sigma*sigma));return Math.max(0,input.sourceRate*(1-input.reduction/100)*lateral*timeWeight/(1+down*.018));}
+export function scenario(input:PuffInput){return receptors.map(r=>({...r,exposure:+exposureAt(r,input).toFixed(1)}));}

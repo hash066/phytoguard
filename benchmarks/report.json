@@ -1,0 +1,22 @@
+{
+  "source": "NOAA CAPTEX Release 2 measured tracer concentrations",
+  "sourceUrl": "https://www.ready.noaa.gov/documents/AMS2018/captex/captex2_meas.txt",
+  "method": "simple Gaussian puff proxy; chronological 70/30 split; metrics on log1p concentration",
+  "trainSamples": 276,
+  "holdoutSamples": 119,
+  "parameters": {
+    "bearingDegrees": 30,
+    "speedKmH": 20
+  },
+  "holdout": {
+    "correlation": -0.359,
+    "rmseLog": 3.663,
+    "biasLog": -1.556
+  },
+  "runtimeMs": 92.9,
+  "limitations": [
+    "CAPTEX used a non-biological tracer",
+    "Parameters are fitted to one historical release",
+    "No crop infection or treatment inference is supported"
+  ]
+}

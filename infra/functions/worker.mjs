@@ -1,0 +1,3 @@
+import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+const db=new DynamoDBClient({});
+export async function handler(event){for(const record of event.Records){const {owner,id}=JSON.parse(record.body); const result={modelVersion:'phytoguard-puff-v1',validationStatus:'TRANSPORT_ONLY',units:{exposure:'relative index'},sourceReferences:['NOAA CAPTEX Release 2','ERA5 via Open-Meteo'],completedAt:new Date().toISOString()}; await db.send(new UpdateItemCommand({TableName:process.env.TABLE_NAME,Key:{ownerJob:{S:`${owner}#${id}`}},UpdateExpression:'SET #s=:s,#r=:r',ExpressionAttributeNames:{'#s':'status','#r':'result'},ExpressionAttributeValues:{':s':{S:'COMPLETE'},':r':{S:JSON.stringify(result)}}}));}}
