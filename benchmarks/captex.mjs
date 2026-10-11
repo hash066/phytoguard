@@ -1,5 +1,101 @@
-import{readFileSync,writeFileSync}from'node:fs';import{performance}from'node:perf_hooks';
-const path=new URL('../data/noaa/captex2_meas.txt',import.meta.url);const rows=readFileSync(path,'utf8').trim().split(/\r?\n/).slice(2).map(line=>{const p=line.trim().split(/\s+/);return{date:new Date(`${p[0]}-${p[1]}-${p[2]}T${p[3].slice(0,2)}:${p[3].slice(2)}:00Z`),lat:+p[5],lon:+p[6],measured:+p[7],station:p[8]}});const origin=new Date('1983-09-25T17:00:00Z'),source={lat:39.90,lon:-84.22};
-function feature(r,bearing,speed){const x=(r.lon-source.lon)*85,y=(r.lat-source.lat)*111,rad=bearing*Math.PI/180,down=x*Math.cos(rad)+y*Math.sin(rad),cross=-x*Math.sin(rad)+y*Math.cos(rad),hours=Math.max(1,(r.date-origin)/36e5);if(down<=0)return 0;const center=speed*hours,sigma=20+hours*3;return Math.exp(-cross*cross/(2*sigma*sigma))*Math.exp(-((down-center)**2)/(2*(35+hours*4)**2))/(1+down*.006)}
-const cut=Math.floor(rows.length*.7),train=rows.slice(0,cut),test=rows.slice(cut);let best={rmse:Infinity,bearing:0,speed:0,scale:0};const started=performance.now();for(let bearing=0;bearing<360;bearing+=5)for(let speed=10;speed<=100;speed+=5){const xs=train.map(r=>feature(r,bearing,speed)),ys=train.map(r=>Math.log1p(r.measured));const scale=xs.reduce((s,x,i)=>s+x*ys[i],0)/(xs.reduce((s,x)=>s+x*x,0)||1);const rmse=Math.sqrt(xs.reduce((s,x,i)=>s+(x*scale-ys[i])**2,0)/xs.length);if(rmse<best.rmse)best={rmse,bearing,speed,scale};}
-const actual=test.map(r=>Math.log1p(r.measured)),pred=test.map(r=>feature(r,best.bearing,best.speed)*best.scale);const mean=a=>a.reduce((s,x)=>s+x,0)/a.length,ma=mean(actual),mp=mean(pred);const corr=actual.reduce((s,x,i)=>s+(x-ma)*(pred[i]-mp),0)/Math.sqrt(actual.reduce((s,x)=>s+(x-ma)**2,0)*pred.reduce((s,x)=>s+(x-mp)**2,0)||1);const rmse=Math.sqrt(actual.reduce((s,x,i)=>s+(x-pred[i])**2,0)/actual.length);const bias=mean(pred.map((x,i)=>x-actual[i]));const report={source:'NOAA CAPTEX Release 2 measured tracer concentrations',sourceUrl:'https://www.ready.noaa.gov/documents/AMS2018/captex/captex2_meas.txt',method:'simple Gaussian puff proxy; chronological 70/30 split; metrics on log1p concentration',trainSamples:train.length,holdoutSamples:test.length,parameters:{bearingDegrees:best.bearing,speedKmH:best.speed},holdout:{correlation:+corr.toFixed(3),rmseLog:+rmse.toFixed(3),biasLog:+bias.toFixed(3)},runtimeMs:+(performance.now()-started).toFixed(1),limitations:['CAPTEX used a non-biological tracer','Parameters are fitted to one historical release','No crop infection or treatment inference is supported']};writeFileSync(new URL('./report.json',import.meta.url),JSON.stringify(report,null,2));console.log(report);
+import { readFileSync, writeFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
+import { createHash } from 'node:crypto';
+
+const sourceFile = new URL('../data/noaa/captex2_meas.txt', import.meta.url);
+const sourceText = readFileSync(sourceFile, 'utf8');
+const rows = sourceText.trim().split(/\r?\n/).slice(2).map((line) => {
+  const fields = line.trim().split(/\s+/);
+  return {
+    date: new Date(`${fields[0]}-${fields[1]}-${fields[2]}T${fields[3].slice(0, 2)}:${fields[3].slice(2)}:00Z`),
+    lat: +fields[5],
+    lon: +fields[6],
+    measured: +fields[7],
+    station: fields[8],
+  };
+}).filter((row) => Number.isFinite(row.measured) && Number.isFinite(row.lat) && Number.isFinite(row.lon));
+
+const release = new Date('1983-09-25T17:00:00Z');
+const source = { lat: 39.90, lon: -84.22 };
+const mean = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
+const rmse = (actual, predicted) => Math.sqrt(mean(actual.map((value, index) => (value - predicted[index]) ** 2)));
+
+function footprint(row, bearing, speed, crosswindGrowth) {
+  const eastKm = (row.lon - source.lon) * 85;
+  const northKm = (row.lat - source.lat) * 111;
+  const radians = bearing * Math.PI / 180;
+  const downwindKm = eastKm * Math.sin(radians) + northKm * Math.cos(radians);
+  const crosswindKm = eastKm * Math.cos(radians) - northKm * Math.sin(radians);
+  const hours = Math.max(1, (row.date - release) / 3.6e6);
+  if (downwindKm <= 0) return 0;
+  const centerKm = speed * hours;
+  const alongSigma = 35 + hours * 5;
+  const crossSigma = 15 + hours * crosswindGrowth;
+  return Math.exp(-0.5 * (crosswindKm / crossSigma) ** 2)
+    * Math.exp(-0.5 * ((downwindKm - centerKm) / alongSigma) ** 2)
+    / (1 + downwindKm * 0.006);
+}
+
+const cut = Math.floor(rows.length * 0.7);
+const train = rows.slice(0, cut);
+const holdout = rows.slice(cut);
+const started = performance.now();
+let best = { rmse: Infinity, bearing: 0, speed: 0, crosswindGrowth: 0, scale: 0 };
+
+for (let bearing = 0; bearing < 360; bearing += 5) {
+  for (let speed = 10; speed <= 100; speed += 5) {
+    for (let growth = 2; growth <= 8; growth += 2) {
+      const features = train.map((row) => footprint(row, bearing, speed, growth));
+      const actual = train.map((row) => Math.log1p(row.measured));
+      const scale = features.reduce((sum, value, index) => sum + value * actual[index], 0)
+        / (features.reduce((sum, value) => sum + value * value, 0) || 1);
+      const error = rmse(actual, features.map((value) => value * scale));
+      if (error < best.rmse) best = { rmse: error, bearing, speed, crosswindGrowth: growth, scale };
+    }
+  }
+}
+
+const actual = holdout.map((row) => Math.log1p(row.measured));
+const predicted = holdout.map((row) => footprint(row, best.bearing, best.speed, best.crosswindGrowth) * best.scale);
+const actualMean = mean(actual);
+const predictedMean = mean(predicted);
+const correlation = actual.reduce((sum, value, index) => sum + (value - actualMean) * (predicted[index] - predictedMean), 0)
+  / Math.sqrt(actual.reduce((sum, value) => sum + (value - actualMean) ** 2, 0)
+    * predicted.reduce((sum, value) => sum + (value - predictedMean) ** 2, 0) || 1);
+const modelRmse = rmse(actual, predicted);
+const zeroRmse = rmse(actual, actual.map(() => 0));
+const bias = mean(predicted.map((value, index) => value - actual[index]));
+const skillPct = 100 * (1 - modelRmse / zeroRmse);
+
+const report = {
+  source: 'NOAA CAPTEX Release 2 measured tracer concentrations',
+  sourceUrl: 'https://www.ready.noaa.gov/documents/AMS2018/captex/captex2_meas.txt',
+  sourceSha256: createHash('sha256').update(sourceText).digest('hex'),
+  method: 'Gaussian footprint proxy; ordered row 70/30 holdout; metrics on log1p concentration',
+  splitWarning: 'Rows are ordered by observation time and station; later rows form the holdout. No holdout values are used during parameter search.',
+  totalSamples: rows.length,
+  trainSamples: train.length,
+  holdoutSamples: holdout.length,
+  parameters: { bearingDegrees: best.bearing, speedKmH: best.speed, crosswindGrowthKmPerHour: best.crosswindGrowth },
+  holdout: { correlation: +correlation.toFixed(3), rmseLog: +modelRmse.toFixed(3), biasLog: +bias.toFixed(3) },
+  baseline: { name: 'zero concentration', rmseLog: +zeroRmse.toFixed(3) },
+  skill: { rmseVsZeroPct: +skillPct.toFixed(1), passed: skillPct > 0 && correlation > 0 },
+  runtimeMs: +(performance.now() - started).toFixed(1),
+  applicability: 'NO_SKILL_ON_HOLDOUT',
+  limitations: [
+    'CAPTEX used a non-biological perfluorocarbon tracer.',
+    'Parameters are fitted to one release without assimilated meteorology.',
+    'Negative holdout correlation means the proxy is not suitable for operational prediction.',
+    'No crop infection, pesticide, treatment, yield, or financial inference is supported.',
+  ],
+};
+
+writeFileSync(new URL('./report.json', import.meta.url), `${JSON.stringify(report, null, 2)}\n`);
+console.table({
+  holdoutSamples: report.holdoutSamples,
+  correlation: report.holdout.correlation,
+  rmseLog: report.holdout.rmseLog,
+  biasLog: report.holdout.biasLog,
+  skillVsZeroPct: report.skill.rmseVsZeroPct,
+  status: report.applicability,
+});

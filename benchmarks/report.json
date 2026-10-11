@@ -1,22 +1,36 @@
 {
   "source": "NOAA CAPTEX Release 2 measured tracer concentrations",
   "sourceUrl": "https://www.ready.noaa.gov/documents/AMS2018/captex/captex2_meas.txt",
-  "method": "simple Gaussian puff proxy; chronological 70/30 split; metrics on log1p concentration",
+  "sourceSha256": "93193915101724d90f32085d6a32324a22250975b2838ed851baa7e4fbfbaa6f",
+  "method": "Gaussian footprint proxy; ordered row 70/30 holdout; metrics on log1p concentration",
+  "splitWarning": "Rows are ordered by observation time and station; later rows form the holdout. No holdout values are used during parameter search.",
+  "totalSamples": 395,
   "trainSamples": 276,
   "holdoutSamples": 119,
   "parameters": {
-    "bearingDegrees": 30,
-    "speedKmH": 20
+    "bearingDegrees": 60,
+    "speedKmH": 25,
+    "crosswindGrowthKmPerHour": 6
   },
   "holdout": {
-    "correlation": -0.359,
-    "rmseLog": 3.663,
-    "biasLog": -1.556
+    "correlation": -0.126,
+    "rmseLog": 3.265,
+    "biasLog": -1.662
   },
-  "runtimeMs": 92.9,
+  "baseline": {
+    "name": "zero concentration",
+    "rmseLog": 4.167
+  },
+  "skill": {
+    "rmseVsZeroPct": 21.6,
+    "passed": false
+  },
+  "runtimeMs": 373.4,
+  "applicability": "NO_SKILL_ON_HOLDOUT",
   "limitations": [
-    "CAPTEX used a non-biological tracer",
-    "Parameters are fitted to one historical release",
-    "No crop infection or treatment inference is supported"
+    "CAPTEX used a non-biological perfluorocarbon tracer.",
+    "Parameters are fitted to one release without assimilated meteorology.",
+    "Negative holdout correlation means the proxy is not suitable for operational prediction.",
+    "No crop infection, pesticide, treatment, yield, or financial inference is supported."
   ]
 }
